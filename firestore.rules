@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Each browser signs in anonymously and can only touch its own log.
+    // Deletes are blocked: the extension "deletes" by setting deleted=true, so nothing is ever lost.
+    match /users/{uid}/entries/{entryId} {
+      allow read, create, update: if request.auth != null && request.auth.uid == uid;
+      allow delete: if false;
+    }
+  }
+}
