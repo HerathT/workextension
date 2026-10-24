@@ -24,9 +24,13 @@ git push -u origin main
 `git clone` the repo to a folder that stays on disk, then open `chrome://extensions` (or `edge://extensions`), turn on **Developer mode**, **Load unpacked**, choose the folder.
 Do not move or delete that folder afterwards, or the browser drops the extension. To update: `git pull`, then press reload on the extension card.
 
+## Priority points
+Under **Notes** there is a **Priority points** list. Type a point, choose **High / Medium / Low** (default Medium, the choice stays selected so you can add several in a row), press Enter. Points are shown High first; click a colored badge to change its priority, edit the text in place, or remove it with the x.
+They are saved inside each entry as `points: [{ id, text, priority, t }]`, so they sync to Firestore with the rest of the entry. They also appear under *Previous work*, in the "Continuing" panel, in search (try "high"), and in the Word report as a color-coded table.
+
 ## Downloading a Word report
 Anytime, no warnings or reminders. Use **Download** in the *Previous work* panel (exports everything listed, so search text or the From/To dates narrow it), the download icon on one entry, or **Download this session (Word)** under current work.
-The .docx has a title block, a heading per day, a heading per work entry (time, duration, notes, bullet points), and a table of visited websites with clickable links, plus page numbers.
+The .docx has a title block, a heading per day, a heading per work entry (time, duration, notes, bullet points, a color-coded priority table), and a table of visited websites with clickable links, plus page numbers.
 
 ## Behaviour
 - On the first start of every browser session the log page opens before any website loads; once you start work it stays pinned and is never closed or navigated away by the extension.

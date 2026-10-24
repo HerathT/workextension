@@ -2,6 +2,11 @@ export const uid = () => Date.now().toString(36) + Math.random().toString(36).sl
 const lock = fn => navigator.locks.request('dwl-store', fn);
 const get = async k => (await chrome.storage.local.get(k))[k];
 
+// ---- priority points: [{ id, text, priority: 'high'|'medium'|'low', t }] stored inside each entry (and so in Firestore) ----
+export const PRIORITIES = ['high', 'medium', 'low'];
+export const priLabel = p => ({ high: 'High', medium: 'Medium', low: 'Low' }[p] || 'Medium');
+export const sortPoints = pts => [...(pts || [])].sort((a, b) => (PRIORITIES.indexOf(a.priority) + 1 || 2) - (PRIORITIES.indexOf(b.priority) + 1 || 2) || (a.t || 0) - (b.t || 0));
+
 // ---- sync bookkeeping (Firestore sync lives in sync.js; everything is written locally first) ----
 const PEND = 'pending';                                   // { entryId: stamp } entries waiting to be pushed to Firestore
 const stamp = () => Date.now() + Math.random();
@@ -25,7 +30,7 @@ export const createEntry = async d => {
   return lock(async () => {
     const t = Date.now();
     const e = { id: uid(), title: d.title, notes: '', startedAt: t, endedAt: null, lastActive: t, updatedAt: t,
-                continuedFrom: d.continuedFrom || null, bsid: d.bsid, visits: [],
+                continuedFrom: d.continuedFrom || null, bsid: d.bsid, visits: [], points: [],
                 device, browser: browserName(), deleted: false };
     const ids = (await get('ids')) || [];
     const p = (await get(PEND)) || {};

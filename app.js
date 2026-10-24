@@ -1,10 +1,10 @@
 import * as S from './store.js';
-const { fDate, fTime, fFull, groupVisits } = S;
+const { fDate, fTime, fFull, groupVisits, sortPoints, priLabel } = S;
 const $ = s => document.querySelector(s), mode = document.body.dataset.mode;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const next = new URLSearchParams(location.search).get('next');
 const deb = (f, ms = 400) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); }; };
-let sid = null, bsid = null, entries = [], shown = null, started = false;
+let sid = null, bsid = null, entries = [], shown = null, started = false, newPri = 'medium';
 const open = new Set(), cur = () => entries.find(e => e.id === sid);
 
 async function load() {
@@ -44,11 +44,34 @@ function formView() {
   t.onkeydown = e => { if (e.key === 'Enter') $('#start').click(); };
   $('#start').onclick = () => { const v = t.value.trim(); if (!v) { t.classList.add('err'); t.focus(); return; } begin(v, null, $('#plan').value.trim()); };
 }
+const ptsHtml = pts => (pts && pts.length) ? `<div class="hps">${sortPoints(pts).map(p => `<div class="hp"><span class="pri xs ${p.priority}">${priLabel(p.priority)}</span><span>${esc(p.text)}</span></div>`).join('')}</div>` : '';
+const NEXT = { high: 'medium', medium: 'low', low: 'high' };
+const syncSeg = () => document.querySelectorAll('#pseg button').forEach(b => b.classList.toggle('on', b.dataset.p === newPri));
+function renderPoints(force) {
+  const el = $('#plist'), c = cur(); if (!el || !c) return;
+  if (!force && el.contains(document.activeElement)) return;          // never redraw while a point is being edited
+  const pts = sortPoints(c.points);
+  el.innerHTML = pts.length ? pts.map(p => `<div class="pt"><button type="button" class="pri ${p.priority}" data-act="pcycle" data-id="${p.id}" title="Click to change priority">${priLabel(p.priority)}</button><input class="in ptx" data-id="${p.id}" value="${esc(p.text)}"><button type="button" class="ico dn" data-act="pdel" data-id="${p.id}" title="Remove point"><i class="fa-solid fa-xmark"></i></button></div>`).join('')
+    : '<div class="empty">No priority points yet. Add the points that matter and mark them High, Medium or Low.</div>';
+}
+async function editPoint(id, fn) {
+  await S.mutate(sid, x => { const i = (x.points || []).findIndex(p => p.id === id); if (i < 0) return false; if (fn) fn(x.points[i]); else x.points.splice(i, 1); });
+  await load(); renderPoints(true);
+}
+async function addPoint() {
+  const i = $('#pt'), v = i.value.trim(); if (!v) { i.focus(); return; }
+  i.value = '';
+  await S.mutate(sid, x => { (x.points ||= []).push({ id: S.uid(), text: v, priority: newPri, t: Date.now() }); });
+  await load(); renderPoints(true); i.focus();
+}
 function dashView() {
   const c = cur();
   $('#work').innerHTML = `<div class="pane"><div class="ph"><span><i class="fa-solid fa-circle dot"></i> Current work</span><span class="meta">Started ${fTime(c.startedAt)} - <span id="dur"></span></span></div><div class="body">
     <label>Title<input id="ct" class="in big" value="${esc(c.title)}"></label>
     <label>Notes <span class="meta" id="saved"></span><textarea id="cn" class="in" rows="6" placeholder="What you did, what is left, links, decisions">${esc(c.notes)}</textarea></label>
+    <div class="pts"><div class="pth"><b>Priority points</b><span class="meta">Mark what matters most: High, Medium or Low</span></div>
+      <div class="padd"><input id="pt" class="in" autocomplete="off" placeholder="Type a point and press Enter"><div class="seg" id="pseg"><button type="button" data-act="psel" data-p="high">High</button><button type="button" data-act="psel" data-p="medium">Medium</button><button type="button" data-act="psel" data-p="low">Low</button></div><button class="btn on" type="button" data-act="padd"><i class="fa-solid fa-plus"></i> Add</button></div>
+      <div id="plist"></div></div>
     <div class="row"><button class="btn" data-act="finish"><i class="fa-solid fa-flag-checkered"></i> Finish and start new work</button>
     <button class="btn" data-act="dlsess"><i class="fa-solid fa-file-word"></i> Download this session (Word)</button></div></div></div>
     <div id="prev"></div>
@@ -56,7 +79,8 @@ function dashView() {
   const sv = deb(async (k, v) => { await S.mutate(sid, x => { x[k] = v; }); $('#saved').textContent = 'Saved ' + fTime(Date.now()); });
   $('#ct').oninput = e => sv('title', e.target.value.trim() || 'Untitled work');
   $('#cn').oninput = e => sv('notes', e.target.value);
-  renderSites(); renderPrev();
+  $('#pt').onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); addPoint(); } };
+  syncSeg(); renderSites(); renderPrev(); renderPoints(true);
 }
 function renderSites() {
   const c = cur(); if (!c || !$('#sites')) return;
@@ -70,13 +94,13 @@ function renderPrev() {
   if (!p) { el.innerHTML = ''; return; }
   const g = groupVisits(p.visits);
   el.innerHTML = `<div class="pane"><div class="ph"><span><i class="fa-solid fa-link"></i> Continuing: ${esc(p.title)}</span>${g.length ? `<button class="btn" data-act="openall" data-id="${p.id}"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open ${Math.min(g.length, 15)} sites</button>` : ''}</div>
-    <div class="det"><div class="meta">${fDate(p.startedAt)}, ${fTime(p.startedAt)}</div>${p.notes.trim() ? `<pre>${esc(p.notes.trim())}</pre>` : ''}${g.slice(0, 8).map(v => `<a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.title)}</a>`).join('')}</div></div>`;
+    <div class="det"><div class="meta">${fDate(p.startedAt)}, ${fTime(p.startedAt)}</div>${p.notes.trim() ? `<pre>${esc(p.notes.trim())}</pre>` : ''}${ptsHtml(p.points)}${g.slice(0, 8).map(v => `<a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.title)}</a>`).join('')}</div></div>`;
 }
 const dayStart = v => v ? new Date(v + 'T00:00:00').getTime() : null;
 let listed = [];
 function renderHist() {
   const q = $('#hq').value.trim().toLowerCase(), from = dayStart($('#hf').value), to = dayStart($('#ht').value);
-  const hay = e => (e.title + ' ' + e.notes + ' ' + e.visits.map(v => v.url + ' ' + v.title).join(' ')).toLowerCase();
+  const hay = e => (e.title + ' ' + e.notes + ' ' + (e.points || []).map(p => p.text + ' ' + p.priority).join(' ') + ' ' + e.visits.map(v => v.url + ' ' + v.title).join(' ')).toLowerCase();
   const list = entries.filter(e => (!q || q.split(/\s+/).every(t => hay(e).includes(t))) && (from == null || e.startedAt >= from) && (to == null || e.startedAt < to + 86400000));
   listed = list; $('#dlabel').textContent = 'Download' + (list.length ? ' (' + list.length + ')' : ''); $('#dlist').disabled = !list.length;
   let h = '', day = '';
@@ -88,7 +112,7 @@ function renderHist() {
       <div class="acts">${act ? '' : `<button class="ico" data-act="cont" data-id="${e.id}" title="Continue this work"><i class="fa-solid fa-play"></i></button>`}
       <button class="ico" data-act="dl" data-id="${e.id}" title="Download"><i class="fa-solid fa-download"></i></button>
       <button class="ico dn" data-act="del" data-id="${e.id}" title="Delete"><i class="fa-solid fa-trash-can"></i></button></div></div>
-      ${open.has(e.id) ? `<div class="det">${e.notes.trim() ? `<pre>${esc(e.notes.trim().slice(0, 600))}</pre>` : '<div class="meta">No notes.</div>'}${n.slice(0, 8).map(v => `<a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.title)}</a>`).join('')}</div>` : ''}</div>`;
+      ${open.has(e.id) ? `<div class="det">${e.notes.trim() ? `<pre>${esc(e.notes.trim().slice(0, 600))}</pre>` : (e.points || []).length ? '' : '<div class="meta">No notes.</div>'}${ptsHtml(e.points)}${n.slice(0, 8).map(v => `<a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.title)}</a>`).join('')}</div>` : ''}</div>`;
   }
   $('#hist').innerHTML = h || `<div class="empty">${entries.length ? 'No earlier work matches.' : 'Nothing logged yet.'}</div>`;
 }
@@ -117,7 +141,7 @@ async function refresh() {
   const c = cur();
   if ((c ? c.id : 'form') !== shown) return render();
   if (!c) return;
-  renderSites(); renderPrev();
+  renderSites(); renderPrev(); renderPoints();
   const idle = (el, v) => { if (el && document.activeElement !== el && el.value !== v) el.value = v; };
   idle($('#ct'), c.title); idle($('#cn'), c.notes);
 }
@@ -125,7 +149,11 @@ async function refresh() {
 document.addEventListener('click', async ev => {
   const t = ev.target.closest('[data-act]'); if (!t) return;
   const a = t.dataset.act, id = t.dataset.id, e = entries.find(x => x.id === id);
-  if (a === 'tog') { open.has(id) ? open.delete(id) : open.add(id); renderHist(); }
+  if (a === 'psel') { newPri = t.dataset.p; syncSeg(); $('#pt').focus(); }
+  else if (a === 'padd') addPoint();
+  else if (a === 'pcycle') await editPoint(id, p => { p.priority = NEXT[p.priority] || 'high'; });
+  else if (a === 'pdel') await editPoint(id, null);
+  else if (a === 'tog') { open.has(id) ? open.delete(id) : open.add(id); renderHist(); }
   else if (a === 'cont' && e) begin(e.title, e.id, '');
   else if (a === 'dl' && e) { await exportList([e]); }
   else if (a === 'del' && e) {
@@ -137,6 +165,10 @@ document.addEventListener('click', async ev => {
   else if (a === 'dlsess') exportList(entries.filter(x => x.bsid === bsid));
   else if (a === 'openall' && e) groupVisits(e.visits).slice(0, 15).forEach(v => chrome.tabs.create({ url: v.url, active: false }));
 });
+const savePt = (id, v) => S.mutate(sid, x => { const p = (x.points || []).find(q => q.id === id); if (!p || p.text === v) return false; p.text = v; });
+const savePtLater = deb(savePt, 500);
+document.addEventListener('input', ev => { const i = ev.target.closest && ev.target.closest('.ptx'); if (i && i.value.trim()) savePtLater(i.dataset.id, i.value.trim()); });
+document.addEventListener('change', ev => { const i = ev.target.closest && ev.target.closest('.ptx'); if (!i) return; const v = i.value.trim(); if (v) savePt(i.dataset.id, v); else editPoint(i.dataset.id, null); });
 $('#hq').oninput = renderHist; $('#hf').oninput = $('#ht').oninput = renderHist;
 $('#dlist').onclick = () => exportList(listed);
 chrome.storage.onChanged.addListener((ch, area) => {

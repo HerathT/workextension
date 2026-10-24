@@ -1,11 +1,13 @@
 // Builds a clean, professional Word (.docx) report from work entries. Loaded only when you press Download.
 import { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, ShadingType,
   BorderStyle, ExternalHyperlink, Footer, PageNumber, AlignmentType, LevelFormat, VerticalAlign } from './vendor/docx.js';
-import { fTime, groupVisits, hostOf, slug } from './store.js';
+import { fTime, groupVisits, hostOf, slug, sortPoints, priLabel } from './store.js';
 
 const NAVY = '1F2A44', BLUE = '1F5AA6', GREY = '667085', LINE = 'D5D9DF', HEAD = 'E8EEF7';
 const WIDTH = 9638;                                     // A4 with 2 cm margins, in DXA
 const COLS = [1300, 4938, 2500, 900];                   // Time | Page | Site | Visits  (sums to WIDTH)
+const PCOLS = [1500, 8138];                             // Priority | Point
+const PRI = { high: { fill: 'FBD9D5', color: 'B42318' }, medium: { fill: 'FCEBC4', color: '8A5A00' }, low: { fill: 'DCEFE0', color: '2E7D32' } };
 const pad2 = n => String(n).padStart(2, '0');
 const ymd = t => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 const longDay = t => new Date(t).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -18,8 +20,8 @@ const meta = (text, after = 80) => new Paragraph({ spacing: { after }, children:
 const border = { style: BorderStyle.SINGLE, size: 4, color: LINE };
 const borders = { top: border, bottom: border, left: border, right: border };
 
-function cell(i, children, fill) {
-  return new TableCell({ width: { size: COLS[i], type: WidthType.DXA }, borders, verticalAlign: VerticalAlign.CENTER,
+function cell(i, children, fill, cols = COLS) {
+  return new TableCell({ width: { size: cols[i], type: WidthType.DXA }, borders, verticalAlign: VerticalAlign.CENTER,
     margins: { top: 70, bottom: 70, left: 110, right: 110 },
     shading: fill ? { fill, type: ShadingType.CLEAR, color: 'auto' } : undefined, children });
 }
@@ -37,6 +39,15 @@ function sitesTable(visits) {
     cell(2, [para([run(v.host, { size: 20, color: GREY })])]),
     cell(3, [para([run(String(v.count), { size: 20 })], AlignmentType.CENTER)]) ] }));
   return new Table({ width: { size: WIDTH, type: WidthType.DXA }, columnWidths: COLS, rows: [head, ...rows] });
+}
+
+function pointsTable(points) {
+  const head = new TableRow({ tableHeader: true, cantSplit: true, children: ['Priority', 'Point'].map((t, i) =>
+    cell(i, [para([run(t, { bold: true, size: 20, color: NAVY })], i === 0 ? AlignmentType.CENTER : undefined)], HEAD, PCOLS)) });
+  const rows = sortPoints(points).map(p => { const c = PRI[p.priority] || PRI.medium; return new TableRow({ cantSplit: true, children: [
+    cell(0, [para([run(priLabel(p.priority), { bold: true, size: 20, color: c.color })], AlignmentType.CENTER)], c.fill, PCOLS),
+    cell(1, [para([run(p.text, { size: 21 })])], undefined, PCOLS) ] }); });
+  return new Table({ width: { size: WIDTH, type: WidthType.DXA }, columnWidths: PCOLS, rows: [head, ...rows] });
 }
 
 function notesBlock(notes) {
@@ -61,11 +72,13 @@ export async function buildDoc(list, all = [], activeId = null) {
   const endOf = e => e.endedAt || (e.id === activeId ? Date.now() : e.lastActive || e.startedAt);
   const total = asc.reduce((n, e) => n + Math.max(0, endOf(e) - e.startedAt), 0);
   const pages = asc.reduce((n, e) => n + groupVisits(e.visits).length, 0);
+  const allPts = asc.flatMap(e => e.points || []), nHigh = allPts.filter(p => p.priority === 'high').length;
   const first = asc[0].startedAt, last = asc[asc.length - 1].startedAt;
   const kids = [
     new Paragraph({ heading: HeadingLevel.TITLE, children: [run('Daily Work Log')] }),
     meta(ymd(first) === ymd(last) ? longDay(first) : `${shortDay(first)} – ${shortDay(last)}`, 40),
-    meta(`${asc.length} work ${asc.length === 1 ? 'entry' : 'entries'}  ·  ${span(total)} logged  ·  ${pages} ${pages === 1 ? 'page' : 'pages'} visited`, 40),
+    meta(`${asc.length} work ${asc.length === 1 ? 'entry' : 'entries'}  ·  ${span(total)} logged  ·  ${pages} ${pages === 1 ? 'page' : 'pages'} visited`
+      + (allPts.length ? `  ·  ${allPts.length} priority ${allPts.length === 1 ? 'point' : 'points'} (${nHigh} high)` : ''), 40),
     meta(`Generated ${new Date().toLocaleString(undefined, { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 200),
   ];
   let day = '';
@@ -80,6 +93,7 @@ export async function buildDoc(list, all = [], activeId = null) {
     if (e.continuedFrom) kids.push(meta(prev ? `Continues: ${prev.title}` : 'Continuation of earlier work', 60));
     const notes = notesBlock(e.notes);
     if (notes.length) kids.push(new Paragraph({ heading: HeadingLevel.HEADING_3, children: [run('Notes')] }), ...notes);
+    if ((e.points || []).length) kids.push(new Paragraph({ heading: HeadingLevel.HEADING_3, children: [run('Priority points')] }), pointsTable(e.points), new Paragraph({ spacing: { after: 80 }, children: [] }));
     if (g.length) kids.push(new Paragraph({ heading: HeadingLevel.HEADING_3, children: [run(`Websites visited (${g.length})`)] }), sitesTable(e.visits), new Paragraph({ spacing: { after: 120 }, children: [] }));
   }
   const H = (id, name, size, color, before, after, lvl, extra = {}) => ({ id, name, basedOn: 'Normal', next: 'Normal', quickFormat: true,
