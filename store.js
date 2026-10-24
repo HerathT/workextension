@@ -1,7 +1,6 @@
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const lock = fn => navigator.locks.request('dwl-store', fn);
 const get = async k => (await chrome.storage.local.get(k))[k];
-export const isDirty = e => !e.deleted && (!e.exportedAt || e.updatedAt > e.exportedAt);
 
 // ---- sync bookkeeping (Firestore sync lives in sync.js; everything is written locally first) ----
 const PEND = 'pending';                                   // { entryId: stamp } entries waiting to be pushed to Firestore
@@ -26,7 +25,7 @@ export const createEntry = async d => {
   return lock(async () => {
     const t = Date.now();
     const e = { id: uid(), title: d.title, notes: '', startedAt: t, endedAt: null, lastActive: t, updatedAt: t,
-                exportedAt: null, continuedFrom: d.continuedFrom || null, bsid: d.bsid, visits: [],
+                continuedFrom: d.continuedFrom || null, bsid: d.bsid, visits: [],
                 device, browser: browserName(), deleted: false };
     const ids = (await get('ids')) || [];
     const p = (await get(PEND)) || {};
@@ -83,7 +82,6 @@ export const applyRemote = (list, device) => lock(async () => {
   for (const r of list) {
     const k = 'e:' + r.id, l = await get(k);
     if (r.deleted) { if (l && (!p[r.id] || r.updatedAt >= l.updatedAt)) await purge(r.id, p); continue; }
-    if (r.device && r.device !== device && !r.exportedAt) r.exportedAt = r.updatedAt;   // other browsers' entries are not "unsaved" here
     if (!l) {
       const ids = (await get('ids')) || [];
       await chrome.storage.local.set({ [k]: r, ids: [...ids, r.id] });
@@ -117,22 +115,9 @@ export function groupVisits(visits) {
   }
   return [...m.values()];
 }
-export function toMarkdown(list) {
-  let out = '# Work log\n\n', day = '';
-  for (const e of [...list].sort((a, b) => a.startedAt - b.startedAt)) {
-    const d = fDate(e.startedAt);
-    if (d !== day) { day = d; out += `## ${d}\n\n`; }
-    out += `### ${fTime(e.startedAt)} to ${e.endedAt ? fTime(e.endedAt) : 'ongoing'} - ${e.title}\n\n`;
-    if (e.continuedFrom) out += '_Continuation of earlier work._\n\n';
-    if (e.notes && e.notes.trim()) out += e.notes.trim() + '\n\n';
-    const g = groupVisits(e.visits);
-    if (g.length) out += `Websites visited (${g.length}):\n\n` + g.map(v => `- ${fTime(v.first)} [${v.title.replace(/[\[\]]/g, '')}](${v.url})${v.count > 1 ? ` (${v.count} visits)` : ''}`).join('\n') + '\n\n';
-  }
-  return out;
-}
-export function saveFile(name, text, type) {
+export function saveFile(name, blob) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.href = URL.createObjectURL(blob);
   a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }

@@ -1,10 +1,10 @@
 import * as S from './store.js';
-const { fDate, fTime, fFull, groupVisits, isDirty } = S;
+const { fDate, fTime, fFull, groupVisits } = S;
 const $ = s => document.querySelector(s), mode = document.body.dataset.mode;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const next = new URLSearchParams(location.search).get('next');
 const deb = (f, ms = 400) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), ms); }; };
-let sid = null, bsid = null, entries = [], shown = null, guardOn = false, started = false;
+let sid = null, bsid = null, entries = [], shown = null, started = false;
 const open = new Set(), cur = () => entries.find(e => e.id === sid);
 
 async function load() {
@@ -12,20 +12,13 @@ async function load() {
   bsid = s.bsid || null;
   entries = (await S.listEntries()).sort((a, b) => b.startedAt - a.startedAt);
   sid = entries.some(e => e.id === s.sid) ? s.sid : null;
-  guardOn = entries.some(e => e.bsid === bsid && isDirty(e));
 }
-function renderBanner() {
-  const d = entries.filter(isDirty), old = d.filter(e => e.bsid !== bsid).length;
-  $('#banner').innerHTML = d.length ? `<div class="warn"><i class="fa-solid fa-triangle-exclamation"></i><span><b>${d.length} work entr${d.length > 1 ? 'ies' : 'y'} not downloaded yet</b>${old ? ` (${old} from earlier browser sessions)` : ''}. Everything is saved inside this browser, but download a copy to keep it.</span><button class="btn" data-act="dlall" data-f="md"><i class="fa-solid fa-download"></i> Markdown</button><button class="btn" data-act="dlall" data-f="json">JSON</button></div>` : '';
-}
-async function exportList(list, f) {
+async function exportList(list) {                      // Word report of the given entries, any time
   if (!list.length) return;
-  const asc = [...list].sort((a, b) => a.startedAt - b.startedAt), d = new Date(asc[0].startedAt);
-  const stamp = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  S.saveFile(`work-log-${stamp}${asc.length === 1 ? '-' + S.slug(asc[0].title) : ''}.${f}`,
-    f === 'md' ? S.toMarkdown(asc) : JSON.stringify(asc, null, 2), f === 'md' ? 'text/markdown' : 'application/json');
-  const t = Date.now();
-  for (const e of asc) await S.mutate(e.id, x => { x.exportedAt = t; }, { touch: false });
+  try {
+    const X = await import('./docx-export.js');
+    S.saveFile(X.fileName(list), await X.buildDoc(list, entries, sid));
+  } catch (err) { console.error(err); alert('Could not create the Word document: ' + (err && err.message || err)); }
 }
 async function begin(title, from, notes) {
   started = true;
@@ -57,7 +50,7 @@ function dashView() {
     <label>Title<input id="ct" class="in big" value="${esc(c.title)}"></label>
     <label>Notes <span class="meta" id="saved"></span><textarea id="cn" class="in" rows="6" placeholder="What you did, what is left, links, decisions">${esc(c.notes)}</textarea></label>
     <div class="row"><button class="btn" data-act="finish"><i class="fa-solid fa-flag-checkered"></i> Finish and start new work</button>
-    <button class="btn" data-act="dlsess" data-f="md"><i class="fa-solid fa-download"></i> Download this browser session</button><button class="btn" data-act="dlsess" data-f="json">JSON</button></div></div></div>
+    <button class="btn" data-act="dlsess"><i class="fa-solid fa-file-word"></i> Download this session (Word)</button></div></div></div>
     <div id="prev"></div>
     <div class="pane"><div class="ph"><span><i class="fa-solid fa-globe"></i> Websites visited</span><span class="meta" id="ssum"></span></div><div class="sl" id="sites"></div></div>`;
   const sv = deb(async (k, v) => { await S.mutate(sid, x => { x[k] = v; }); $('#saved').textContent = 'Saved ' + fTime(Date.now()); });
@@ -79,15 +72,18 @@ function renderPrev() {
   el.innerHTML = `<div class="pane"><div class="ph"><span><i class="fa-solid fa-link"></i> Continuing: ${esc(p.title)}</span>${g.length ? `<button class="btn" data-act="openall" data-id="${p.id}"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open ${Math.min(g.length, 15)} sites</button>` : ''}</div>
     <div class="det"><div class="meta">${fDate(p.startedAt)}, ${fTime(p.startedAt)}</div>${p.notes.trim() ? `<pre>${esc(p.notes.trim())}</pre>` : ''}${g.slice(0, 8).map(v => `<a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.title)}</a>`).join('')}</div></div>`;
 }
+const dayStart = v => v ? new Date(v + 'T00:00:00').getTime() : null;
+let listed = [];
 function renderHist() {
-  const q = $('#hq').value.trim().toLowerCase();
+  const q = $('#hq').value.trim().toLowerCase(), from = dayStart($('#hf').value), to = dayStart($('#ht').value);
   const hay = e => (e.title + ' ' + e.notes + ' ' + e.visits.map(v => v.url + ' ' + v.title).join(' ')).toLowerCase();
-  const list = entries.filter(e => !q || q.split(/\s+/).every(t => hay(e).includes(t)));
+  const list = entries.filter(e => (!q || q.split(/\s+/).every(t => hay(e).includes(t))) && (from == null || e.startedAt >= from) && (to == null || e.startedAt < to + 86400000));
+  listed = list; $('#dlabel').textContent = 'Download' + (list.length ? ' (' + list.length + ')' : ''); $('#dlist').disabled = !list.length;
   let h = '', day = '';
   for (const e of list) {
     const d = fDate(e.startedAt); if (d !== day) { day = d; h += `<div class="lh">${d}</div>`; }
     const n = groupVisits(e.visits), act = e.id === sid;
-    h += `<div class="item"><div class="hd" data-act="tog" data-id="${e.id}"><div class="tx"><span class="nm">${esc(e.title)}${act ? '<span class="badge live">Active</span>' : ''}${isDirty(e) ? '<span class="badge warn2">Not downloaded</span>' : ''}</span>
+    h += `<div class="item"><div class="hd" data-act="tog" data-id="${e.id}"><div class="tx"><span class="nm">${esc(e.title)}${act ? '<span class="badge live">Active</span>' : ''}</span>
       <span class="sub">${fTime(e.startedAt)} - ${e.endedAt ? fTime(e.endedAt) : 'ongoing'} - ${n.length} page${n.length === 1 ? '' : 's'}</span></div>
       <div class="acts">${act ? '' : `<button class="ico" data-act="cont" data-id="${e.id}" title="Continue this work"><i class="fa-solid fa-play"></i></button>`}
       <button class="ico" data-act="dl" data-id="${e.id}" title="Download"><i class="fa-solid fa-download"></i></button>
@@ -111,13 +107,13 @@ function tick() {
   const c = cur(), d = $('#dur'); if (c && d) d.textContent = S.dur(n - c.startedAt);
 }
 async function render() {
-  await load(); renderBanner(); renderSync();
+  await load(); renderSync();
   shown = cur() ? cur().id : 'form';
   cur() ? dashView() : formView();
   renderHist(); tick();
 }
 async function refresh() {
-  await load(); renderBanner(); renderHist(); renderSync();
+  await load(); renderHist(); renderSync();
   const c = cur();
   if ((c ? c.id : 'form') !== shown) return render();
   if (!c) return;
@@ -131,18 +127,18 @@ document.addEventListener('click', async ev => {
   const a = t.dataset.act, id = t.dataset.id, e = entries.find(x => x.id === id);
   if (a === 'tog') { open.has(id) ? open.delete(id) : open.add(id); renderHist(); }
   else if (a === 'cont' && e) begin(e.title, e.id, '');
-  else if (a === 'dl' && e) { await exportList([e], 'md'); }
+  else if (a === 'dl' && e) { await exportList([e]); }
   else if (a === 'del' && e) {
-    if (!confirm(`Delete "${e.title}" from the log?${isDirty(e) ? ' It has not been downloaded.' : ''}`)) return;
+    if (!confirm(`Delete "${e.title}" from the log? (A copy stays in Firestore.)`)) return;
     if (id === sid) await chrome.storage.session.remove('sid');
     await S.remove(id); render();
   }
   else if (a === 'finish') { await S.mutate(sid, x => { x.endedAt = Date.now(); }, { touch: false }); await chrome.storage.session.remove('sid'); render(); }
-  else if (a === 'dlall') exportList(entries.filter(isDirty), t.dataset.f);
-  else if (a === 'dlsess') exportList(entries.filter(x => x.bsid === bsid), t.dataset.f);
+  else if (a === 'dlsess') exportList(entries.filter(x => x.bsid === bsid));
   else if (a === 'openall' && e) groupVisits(e.visits).slice(0, 15).forEach(v => chrome.tabs.create({ url: v.url, active: false }));
 });
-$('#hq').oninput = renderHist;
+$('#hq').oninput = renderHist; $('#hf').oninput = $('#ht').oninput = renderHist;
+$('#dlist').onclick = () => exportList(listed);
 chrome.storage.onChanged.addListener((ch, area) => {
   if (area === 'session' && ch.sid) {
     if (ch.sid.newValue && !started && next && mode === 'page') { location.replace(next); return; } // another tab logged the work
@@ -152,7 +148,5 @@ chrome.storage.onChanged.addListener((ch, area) => {
   }
 });
 $('#sync').onclick = () => { $('#sync').textContent = 'Syncing...'; chrome.runtime.sendMessage({ type: 'dwl-sync' }, () => { void chrome.runtime.lastError; renderSync(); }); };
-// Closing the browser or this tab while the current browser session is not downloaded asks for confirmation.
-if (mode === 'page') addEventListener('beforeunload', e => { if (guardOn) { e.preventDefault(); e.returnValue = ''; } });
 setInterval(tick, 1000);
 render();

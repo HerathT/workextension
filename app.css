@@ -65,3 +65,6 @@ textarea.in{resize:vertical}
 .sync:hover{background:var(--hv)}
 .sync.ok i{color:var(--ok)}
 .sync.bad{border-color:#e5c27a;background:#fdf3e1;color:#5c4300}
+.dates{display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid var(--bd)}
+.dates label{flex:1;margin:0}
+.dates .in{padding:5px 8px;font-size:13px}

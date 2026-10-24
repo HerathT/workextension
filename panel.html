@@ -10,12 +10,12 @@
 </head>
 <body data-mode="panel">
 <header class="top"><div class="brand"><i class="fa-solid fa-book-open"></i> Daily Work Log</div><div class="sp"></div><button class="sync" id="sync" type="button"></button><div class="clock" data-clock></div></header>
-<div id="banner"></div>
 <main>
   <section id="work"></section>
   <aside class="pane">
-    <div class="ph"><span><i class="fa-solid fa-clock-rotate-left"></i> Previous work</span></div>
+    <div class="ph"><span><i class="fa-solid fa-clock-rotate-left"></i> Previous work</span><button class="btn" id="dlist" type="button" title="Download the listed work as a Word document"><i class="fa-solid fa-file-word"></i> <span id="dlabel">Download</span></button></div>
     <div class="sbar"><i class="fa-solid fa-magnifying-glass"></i><input id="hq" class="in" placeholder="Search earlier work, notes, websites" autocomplete="off"></div>
+    <div class="dates"><label>From<input type="date" id="hf" class="in"></label><label>To<input type="date" id="ht" class="in"></label></div>
     <div class="list" id="hist"></div>
   </aside>
 </main>

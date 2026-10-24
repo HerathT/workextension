@@ -1,4 +1,4 @@
-import { mutate, listEntries, isDirty, deviceId } from './store.js';
+import { mutate, listEntries, deviceId } from './store.js';
 import { sync } from './sync.js';
 const GATE = chrome.runtime.getURL('log.html');
 const web = u => /^https?:/i.test(u || '');
@@ -15,15 +15,11 @@ async function openGate() {
   if (tabs.length) { chrome.tabs.update(tabs[0].id, { active: true }); chrome.windows.update(tabs[0].windowId, { focused: true }); }
   else chrome.tabs.create({ url: GATE });
 }
-async function badge() {
-  const n = (await listEntries()).filter(isDirty).length;
-  chrome.action.setBadgeText({ text: n ? String(n) : '' });
-  chrome.action.setBadgeBackgroundColor({ color: '#8a5a00' });
-}
 async function boot() {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   chrome.alarms.create('dwl-sync', { periodInMinutes: 1 });
-  await closeStale(); await openGate(); badge();
+  chrome.action.setBadgeText({ text: '' });
+  await closeStale(); await openGate();
   sync();
 }
 chrome.runtime.onInstalled.addListener(boot);
@@ -35,7 +31,6 @@ chrome.alarms.onAlarm.addListener(a => { if (a.name === 'dwl-sync') sync(); });
 let t;
 chrome.storage.onChanged.addListener((c, area) => {
   if (area !== 'local') return;
-  if (Object.keys(c).some(k => k !== 'syncState')) badge();
   if (c.pending && Object.keys(c.pending.newValue || {}).length) { clearTimeout(t); t = setTimeout(() => sync({ pull: false }), 2000); }
 });
 chrome.runtime.onMessage.addListener((m, _s, reply) => {
